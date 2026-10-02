@@ -232,3 +232,11 @@ $XDG_RUNTIME_DIR/rmd.sock
 ## License
 
 [MIT](LICENSE)
+
+---
+
+*Downloads:*
+
+![x86_64](https://img.shields.io/github/downloads/PaulBunch/rmd/rmd-linux-x86_64.tar.gz?displayAssetName=false&label=x86_64)
+![aarch64](https://img.shields.io/github/downloads/PaulBunch/rmd/rmd-linux-aarch64.tar.gz?displayAssetName=false&label=aarch64)
+![crates.io](https://img.shields.io/crates/d/rmd-cli?label=crates.io)
