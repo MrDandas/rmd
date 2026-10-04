@@ -24,38 +24,8 @@ pub fn sync_on_startup(reminders: &mut [Reminder]) {
 
 async fn send_notification(summary: &str, body: &str) {
     let config = load_config();
-    if let Err(e) = send_notification_inner(&config.dbus_service, summary, body).await {
-        eprintln!(
-            "Failed to send notification via D-Bus service '{}': {}",
-            config.dbus_service, e
-        );
-    }
-}
-
-async fn send_notification_inner(service: &str, summary: &str, body: &str) -> Result<()> {
-    let connection = zbus::Connection::session().await?;
-    let mut hints = std::collections::HashMap::new();
-    hints.insert("urgency", zbus::zvariant::Value::from(2u8));
-
-    connection
-        .call_method(
-            Some(service),
-            "/org/freedesktop/Notifications",
-            Some("org.freedesktop.Notifications"),
-            "Notify",
-            &(
-                "rmd",
-                0u32,
-                "",
-                summary,
-                body,
-                Vec::<&str>::new(),
-                hints,
-                -1i32,
-            ),
-        )
-        .await?;
-    Ok(())
+    let dispatcher = crate::notify::NotificationDispatcher::from_config(&config);
+    dispatcher.send_all(summary, body).await;
 }
 
 pub async fn run() -> Result<()> {

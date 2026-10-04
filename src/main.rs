@@ -2,6 +2,7 @@ mod cli;
 mod config;
 mod daemon;
 mod ipc;
+mod notify;
 mod storage;
 mod time;
 mod types;

@@ -3,6 +3,43 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+/// Telegram notification configuration
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct TelegramConfig {
+    pub bot_token: Option<String>,
+    pub chat_id: Option<String>,
+    pub endpoint: String,
+}
+
+impl Default for TelegramConfig {
+    fn default() -> Self {
+        Self {
+            bot_token: None,
+            chat_id: None,
+            endpoint: "https://api.telegram.org".to_string(),
+        }
+    }
+}
+
+impl TelegramConfig {
+    pub fn get_token(&self) -> Option<String> {
+        self.bot_token
+            .clone()
+            .or_else(|| std::env::var("RMD_TELEGRAM_BOT_TOKEN").ok())
+    }
+
+    pub fn get_chat_id(&self) -> Option<String> {
+        self.chat_id
+            .clone()
+            .or_else(|| std::env::var("RMD_TELEGRAM_CHAT_ID").ok())
+    }
+
+    pub fn get_endpoint(&self) -> String {
+        std::env::var("RMD_TELEGRAM_ENDPOINT").unwrap_or_else(|_| self.endpoint.clone())
+    }
+}
+
 /// Application configuration structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -11,6 +48,9 @@ pub struct Config {
     pub limit: usize,
     pub default_time: String,
     pub dbus_service: String,
+    pub backends: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub telegram: Option<TelegramConfig>,
 }
 
 impl Default for Config {
@@ -20,6 +60,8 @@ impl Default for Config {
             limit: 5,
             default_time: "09:00".to_string(),
             dbus_service: "org.freedesktop.Notifications".to_string(),
+            backends: vec!["dbus".to_string()],
+            telegram: None,
         }
     }
 }
@@ -83,14 +125,27 @@ mod tests {
         assert_eq!(config.dbus_service, "org.freedesktop.Notifications");
         assert_eq!(config.limit, 5);
         assert_eq!(config.default_time, "09:00");
+        assert_eq!(config.backends, vec!["dbus"]);
+        assert!(config.telegram.is_none());
     }
 
     #[test]
     fn test_config_deserialization_fallback() {
-        // Test that old JSON without dbus_service populates the default value
+        // Test that old JSON without dbus_service or backends populates default values
         let json_data = r#"{"limit": 10, "default_time": "10:00"}"#;
         let config: Config = serde_json::from_str(json_data).unwrap();
         assert_eq!(config.dbus_service, "org.freedesktop.Notifications");
         assert_eq!(config.limit, 10);
+        assert_eq!(config.backends, vec!["dbus"]);
+        assert!(config.telegram.is_none());
+    }
+
+    #[test]
+    fn test_telegram_config_defaults_and_env() {
+        let tg = TelegramConfig::default();
+        assert_eq!(tg.endpoint, "https://api.telegram.org");
+        assert_eq!(tg.get_endpoint(), "https://api.telegram.org");
+        assert!(tg.get_token().is_none());
+        assert!(tg.get_chat_id().is_none());
     }
 }

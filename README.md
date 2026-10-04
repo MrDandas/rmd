@@ -89,6 +89,38 @@ systemctl --user daemon-reload
 systemctl --user enable --now rmd.service
 ```
 
+### Local Development & Deployment
+
+When modifying `rmd` locally or working from a fork:
+
+#### 1. Compile & Install Locally
+
+Install the binary directly from your cloned directory into `~/.cargo/bin/rmd`:
+
+```bash
+cargo install --path . --force
+```
+
+After rebuilding, remember to restart the daemon so it runs the new binary:
+
+```bash
+rmd stop
+rmd ls    # Auto-spawns the updated daemon
+```
+
+#### 2. Keeping Cargo & Topgrade from Overwriting Local Builds
+
+By installing with `cargo install --path .`, Cargo registers the crate in `~/.cargo/.crates.toml` as a path-based dependency. `cargo-update` (`cargo install-update`) will automatically skip it and **will not** overwrite it with releases from `crates.io`.
+
+To have **[Topgrade](https://github.com/topgrade-rs/topgrade)** automatically recompile and update `rmd` from your local clone during system updates, add a custom command to `~/.config/topgrade.toml`:
+
+```toml
+[commands]
+"rmd (local)" = "cargo install --path /path/to/rmd --force"
+```
+
+*(Alternatively, if you install directly from your GitHub fork via `cargo install --git https://github.com/MrDandas/rmd.git --force`, Topgrade will track and update it automatically when `[cargo] git = true` is enabled in `topgrade.toml`.)*
+
 ## Usage
 
 [Time syntax](docs/TIME.md)
@@ -203,7 +235,41 @@ rmd config time-format human                   # Set display time format (human,
 rmd config limit 10                            # Set default active reminders limit
 rmd config default-time 11:00                  # Set default time for date-only specs
 rmd config dbus-service org.example.MyBridge   # Set custom D-Bus notification target
+rmd config backends dbus telegram              # Set active notification channels (dbus, telegram)
+rmd config test                                # Send a test notification to all active backends
 rmd config reset                               # Reset configuration to default values
+```
+
+### Pluggable Notification Backends (Telegram & D-Bus)
+
+`rmd` provides a modular `Notifier` interface allowing delivery through multiple simultaneous channels:
+
+* **D-Bus**: Desktop notifications via `org.freedesktop.Notifications`.
+* **Telegram**: Push notifications via Telegram Bot API or a custom webhook proxy.
+
+#### Setting up Telegram Notifications
+
+1. Create a bot with [@BotFather](https://t.me/BotFather) on Telegram and get your Bot API token.
+2. Get your numeric Telegram chat ID (e.g. from [@userinfobot](https://t.me/userinfobot) or via `https://api.telegram.org/bot<TOKEN>/getUpdates`).
+3. Configure `rmd`:
+
+```bash
+# Set bot token and chat ID (automatically enables the telegram backend)
+rmd config telegram token "123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ"
+rmd config telegram chat-id "987654321"
+
+# (Optional) Use a custom endpoint or reverse proxy instead of the default https://api.telegram.org:
+rmd config telegram endpoint "https://my-proxy.internal"
+
+# Verify notification delivery:
+rmd config test
+```
+
+> **Tip:** You can also supply credentials via environment variables without saving them to disk: `RMD_TELEGRAM_BOT_TOKEN`, `RMD_TELEGRAM_CHAT_ID`, and `RMD_TELEGRAM_ENDPOINT`.
+
+To clear Telegram credentials and revert to desktop notifications only:
+```bash
+rmd config telegram clear
 ```
 
 ### File Locations

@@ -23,13 +23,20 @@ serde_json = "1.0"
 clap = { version = "4", features = ["derive"] }
 # Date & time handling
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
-# Desktop notifications via D-Bus
-zbus = "5"
 # Application-level error handling
 anyhow = "1.0"
 # Standard system paths (XDG specifications)
 dirs = "6"
 terminal_size = "0.4"
+
+# Notification backends
+zbus = { version = "5", optional = true }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"], optional = true }
+
+[features]
+default = ["dbus", "telegram"]
+dbus = ["dep:zbus"]
+telegram = ["dep:reqwest"]
 
 [profile.release]
 opt-level = "z"     # Optimize aggressively for binary size

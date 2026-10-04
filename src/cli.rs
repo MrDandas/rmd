@@ -5,7 +5,6 @@ use crate::types::{IdOrRange, Reminder, ReminderId, TimeFormat};
 use crate::ui;
 use anyhow::Result;
 use clap::{Parser, Subcommand, ValueEnum};
-use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::io::{self, Write};
 
@@ -51,12 +50,46 @@ pub enum ConfigCommands {
         /// D-Bus service name (e.g., org.freedesktop.Notifications)
         service: String,
     },
+    /// Configure enabled notification backends (e.g., dbus, telegram)
+    Backends {
+        /// Space-separated list of backends to enable (e.g., dbus, telegram)
+        #[arg(required = true, num_args = 1..)]
+        backends: Vec<String>,
+    },
+    /// Configure Telegram notifications
+    Telegram {
+        #[command(subcommand)]
+        command: TelegramConfigCommands,
+    },
+    /// Send a test notification to verify all active notification channels
+    Test,
     /// Reset all configuration settings to default values
     Reset {
         /// Skip confirmation prompt
         #[arg(short, long)]
         yes: bool,
     },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum TelegramConfigCommands {
+    /// Set the Telegram BotFather token
+    Token {
+        /// Bot token (from @BotFather)
+        token: String,
+    },
+    /// Set the destination chat ID
+    ChatId {
+        /// Chat or user ID
+        chat_id: String,
+    },
+    /// Set the Telegram API endpoint URL (default: https://api.telegram.org)
+    Endpoint {
+        /// Custom API endpoint or proxy URL
+        endpoint: String,
+    },
+    /// Clear Telegram configuration
+    Clear,
 }
 
 #[derive(Subcommand, Debug)]
@@ -173,24 +206,74 @@ pub fn parse_time_and_message(args: &[String], default_time: &str) -> Result<(St
 fn print_config(config: &Config) {
     println!("\nConfig File: {}\n", get_config_path().display());
 
-    // Serialize the config struct into an intermediate JSON Value
-    if let Ok(Value::Object(map)) = serde_json::to_value(config) {
-        // Dynamically find maximum key length for proper output alignment
-        let max_key_len = map.keys().map(|k| k.len()).max().unwrap_or(0);
+    let max_key_len = 14;
+    println!(
+        "  {:width$} : {}",
+        "backends",
+        config.backends.join(", "),
+        width = max_key_len
+    );
+    println!(
+        "  {:width$} : {}",
+        "dbus_service",
+        config.dbus_service,
+        width = max_key_len
+    );
+    println!(
+        "  {:width$} : {}",
+        "default_time",
+        config.default_time,
+        width = max_key_len
+    );
+    println!(
+        "  {:width$} : {}",
+        "limit",
+        config.limit,
+        width = max_key_len
+    );
+    println!(
+        "  {:width$} : {}",
+        "time_format",
+        format!("{:?}", config.time_format).to_lowercase(),
+        width = max_key_len
+    );
 
-        for (key, val) in map {
-            // Strip surrounding quotes from string values (e.g., "human" -> human)
-            let val_str = match val {
-                Value::String(s) => s,
-                other => other.to_string(),
-            };
-            println!("  {:width$} : {}", key, val_str, width = max_key_len);
-        }
+    if let Some(ref tg) = config.telegram {
+        println!("\n  [telegram]");
+        let token_masked = tg
+            .get_token()
+            .map(|t| {
+                if t.len() > 10 {
+                    format!("{}...{}", &t[..5], &t[t.len() - 4..])
+                } else {
+                    "***".to_string()
+                }
+            })
+            .unwrap_or_else(|| "<not set>".to_string());
+        let chat_id = tg.get_chat_id().unwrap_or_else(|| "<not set>".to_string());
+        println!(
+            "    {:width$} : {}",
+            "bot_token",
+            token_masked,
+            width = max_key_len
+        );
+        println!(
+            "    {:width$} : {}",
+            "chat_id",
+            chat_id,
+            width = max_key_len
+        );
+        println!(
+            "    {:width$} : {}",
+            "endpoint",
+            tg.get_endpoint(),
+            width = max_key_len
+        );
     }
     println!();
 }
 
-pub fn handle_config_command(cmd: ConfigCommands, config: &mut Config) -> Result<()> {
+pub async fn handle_config_command(cmd: ConfigCommands, config: &mut Config) -> Result<()> {
     match cmd {
         ConfigCommands::Show => {
             print_config(config);
@@ -221,6 +304,62 @@ pub fn handle_config_command(cmd: ConfigCommands, config: &mut Config) -> Result
             set_dbus_service(config, &service)?;
             save_config(config)?;
             println!("✓ D-Bus service set to '{}'", config.dbus_service);
+        }
+        ConfigCommands::Backends { backends } => {
+            set_backends(config, &backends)?;
+            save_config(config)?;
+            println!(
+                "✓ Notification backends set to: {}",
+                config.backends.join(", ")
+            );
+        }
+        ConfigCommands::Telegram { command } => match command {
+            TelegramConfigCommands::Token { token } => {
+                let had_telegram = config.backends.contains(&"telegram".to_string());
+                set_telegram_token(config, &token)?;
+                if !had_telegram {
+                    println!("ℹ Added 'telegram' to active notification backends.");
+                }
+                save_config(config)?;
+                println!("✓ Telegram bot token updated.");
+            }
+            TelegramConfigCommands::ChatId { chat_id } => {
+                let had_telegram = config.backends.contains(&"telegram".to_string());
+                set_telegram_chat_id(config, &chat_id)?;
+                if !had_telegram {
+                    println!("ℹ Added 'telegram' to active notification backends.");
+                }
+                save_config(config)?;
+                println!("✓ Telegram chat ID updated.");
+            }
+            TelegramConfigCommands::Endpoint { endpoint } => {
+                set_telegram_endpoint(config, &endpoint)?;
+                save_config(config)?;
+                println!(
+                    "✓ Telegram endpoint updated to '{}'.",
+                    config.telegram.as_ref().unwrap().endpoint
+                );
+            }
+            TelegramConfigCommands::Clear => {
+                clear_telegram(config);
+                save_config(config)?;
+                println!("✓ Telegram configuration cleared and removed from backends.");
+            }
+        },
+        ConfigCommands::Test => {
+            let dispatcher = crate::notify::NotificationDispatcher::from_config(config);
+            if dispatcher.is_empty() {
+                println!("⚠ No active notification backends configured.");
+            } else {
+                println!(
+                    "Sending test notification to enabled backends ({:?})...",
+                    config.backends
+                );
+                dispatcher
+                    .send_all("rmd test", "This is a test notification from rmd.")
+                    .await;
+                println!("✓ Test notification finished.");
+            }
         }
         ConfigCommands::Reset { yes } => {
             let msg = "Reset all configuration settings to defaults?";
@@ -301,10 +440,80 @@ fn set_dbus_service(config: &mut Config, service: &str) -> Result<()> {
     Ok(())
 }
 
+/// Validates and updates the active notification backends list.
+fn set_backends(config: &mut Config, backends: &[String]) -> Result<()> {
+    let mut cleaned = Vec::new();
+    for b in backends {
+        let name = b.trim().to_lowercase();
+        if name != "dbus" && name != "telegram" {
+            anyhow::bail!(
+                "Unsupported backend '{}'. Supported backends are: dbus, telegram",
+                b
+            );
+        }
+        if !cleaned.contains(&name) {
+            cleaned.push(name);
+        }
+    }
+    if cleaned.is_empty() {
+        anyhow::bail!("At least one notification backend must be specified.");
+    }
+    config.backends = cleaned;
+    Ok(())
+}
+
+/// Sets the Telegram BotFather token and automatically enables the telegram backend.
+fn set_telegram_token(config: &mut Config, token: &str) -> Result<()> {
+    let trimmed = token.trim().to_string();
+    if trimmed.is_empty() {
+        anyhow::bail!("Bot token cannot be empty.");
+    }
+    let mut tg = config.telegram.clone().unwrap_or_default();
+    tg.bot_token = Some(trimmed);
+    config.telegram = Some(tg);
+    if !config.backends.contains(&"telegram".to_string()) {
+        config.backends.push("telegram".to_string());
+    }
+    Ok(())
+}
+
+/// Sets the Telegram chat ID and automatically enables the telegram backend.
+fn set_telegram_chat_id(config: &mut Config, chat_id: &str) -> Result<()> {
+    let trimmed = chat_id.trim().to_string();
+    if trimmed.is_empty() {
+        anyhow::bail!("Chat ID cannot be empty.");
+    }
+    let mut tg = config.telegram.clone().unwrap_or_default();
+    tg.chat_id = Some(trimmed);
+    config.telegram = Some(tg);
+    if !config.backends.contains(&"telegram".to_string()) {
+        config.backends.push("telegram".to_string());
+    }
+    Ok(())
+}
+
+/// Sets the Telegram API endpoint URL.
+fn set_telegram_endpoint(config: &mut Config, endpoint: &str) -> Result<()> {
+    let trimmed = endpoint.trim().to_string();
+    if trimmed.is_empty() {
+        anyhow::bail!("Endpoint URL cannot be empty.");
+    }
+    let mut tg = config.telegram.clone().unwrap_or_default();
+    tg.endpoint = trimmed;
+    config.telegram = Some(tg);
+    Ok(())
+}
+
+/// Clears Telegram configuration and disables the telegram backend.
+fn clear_telegram(config: &mut Config) {
+    config.telegram = None;
+    config.backends.retain(|b| b != "telegram");
+}
+
 pub async fn handle_command(cmd: Commands, config: &mut Config) -> Result<()> {
     match cmd {
         Commands::Daemon => { /* handled in main */ }
-        Commands::Config { command } => handle_config_command(command, config)?,
+        Commands::Config { command } => handle_config_command(command, config).await?,
         Commands::Ls { n } => {
             send_request(
                 Request::List {
@@ -536,5 +745,62 @@ mod tests {
 
         // Ensure old value is preserved on error
         assert_eq!(config.dbus_service, "org.kde.kdeconnect");
+    }
+
+    #[test]
+    fn test_set_backends() {
+        let mut config = Config::default();
+
+        // Valid backends
+        assert!(set_backends(&mut config, &["telegram".to_string(), "dbus".to_string(),]).is_ok());
+        assert_eq!(config.backends, vec!["telegram", "dbus"]);
+
+        // Deduplication
+        assert!(set_backends(&mut config, &["dbus".to_string(), "dbus".to_string(),]).is_ok());
+        assert_eq!(config.backends, vec!["dbus"]);
+
+        // Invalid backend
+        assert!(set_backends(&mut config, &["slack".to_string(),]).is_err());
+
+        // Empty list
+        assert!(set_backends(&mut config, &[]).is_err());
+    }
+
+    #[test]
+    fn test_telegram_config_setters() {
+        let mut config = Config::default();
+
+        // Set token
+        assert!(set_telegram_token(&mut config, "123456:ABC-DEF").is_ok());
+        assert_eq!(
+            config.telegram.as_ref().unwrap().bot_token.as_deref(),
+            Some("123456:ABC-DEF")
+        );
+        assert!(config.backends.contains(&"telegram".to_string()));
+
+        // Empty token should fail
+        assert!(set_telegram_token(&mut config, "   ").is_err());
+
+        // Set chat ID
+        assert!(set_telegram_chat_id(&mut config, "987654321").is_ok());
+        assert_eq!(
+            config.telegram.as_ref().unwrap().chat_id.as_deref(),
+            Some("987654321")
+        );
+
+        // Empty chat ID should fail
+        assert!(set_telegram_chat_id(&mut config, "").is_err());
+
+        // Set custom endpoint
+        assert!(set_telegram_endpoint(&mut config, "https://my-custom-proxy.internal").is_ok());
+        assert_eq!(
+            config.telegram.as_ref().unwrap().endpoint,
+            "https://my-custom-proxy.internal"
+        );
+
+        // Clear
+        clear_telegram(&mut config);
+        assert!(config.telegram.is_none());
+        assert!(!config.backends.contains(&"telegram".to_string()));
     }
 }
