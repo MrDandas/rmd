@@ -235,7 +235,6 @@ rmd config time-format human                   # Set display time format (human,
 rmd config limit 10                            # Set default active reminders limit
 rmd config default-time 11:00                  # Set default time for date-only specs
 rmd config dbus-service org.example.MyBridge   # Set custom D-Bus notification target
-rmd config backends dbus telegram              # Set active notification channels (dbus, telegram)
 rmd config test                                # Send a test notification to all active backends
 rmd config reset                               # Reset configuration to default values
 ```
@@ -247,30 +246,35 @@ rmd config reset                               # Reset configuration to default 
 * **D-Bus**: Desktop notifications via `org.freedesktop.Notifications`.
 * **Telegram**: Push notifications via Telegram Bot API or a custom webhook proxy.
 
-#### Setting up Telegram Notifications
+#### Configuring Telegram in `config.json`
 
-1. Create a bot with [@BotFather](https://t.me/BotFather) on Telegram and get your Bot API token.
-2. Get your numeric Telegram chat ID (e.g. from [@userinfobot](https://t.me/userinfobot) or via `https://api.telegram.org/bot<TOKEN>/getUpdates`).
-3. Configure `rmd`:
+Add `telegram` to the `backends` array and configure credentials in `$XDG_CONFIG_HOME/rmd/config.json` (or `~/.config/rmd/config.json`):
 
+```json
+{
+  "backends": ["dbus", "telegram"],
+  "telegram": {
+    "bot_token": "123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ",
+    "chat_id": "987654321",
+    "endpoint": "https://api.telegram.org"
+  }
+}
+```
+
+* `bot_token`: Your bot token from [@BotFather](https://t.me/BotFather).
+* `chat_id`: Your numeric Telegram user or chat ID (e.g. from [@userinfobot](https://t.me/userinfobot)).
+* `endpoint`: *(Optional)* Custom Telegram proxy or webhook URL (defaults to `https://api.telegram.org`).
+
+Verify your configuration immediately with:
 ```bash
-# Set bot token and chat ID (automatically enables the telegram backend)
-rmd config telegram token "123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ"
-rmd config telegram chat-id "987654321"
-
-# (Optional) Use a custom endpoint or reverse proxy instead of the default https://api.telegram.org:
-rmd config telegram endpoint "https://my-proxy.internal"
-
-# Verify notification delivery:
 rmd config test
 ```
 
-> **Tip:** You can also supply credentials via environment variables without saving them to disk: `RMD_TELEGRAM_BOT_TOKEN`, `RMD_TELEGRAM_CHAT_ID`, and `RMD_TELEGRAM_ENDPOINT`.
-
-To clear Telegram credentials and revert to desktop notifications only:
-```bash
-rmd config telegram clear
-```
+> **Tip:** You can also supply credentials via environment variables without saving secrets to disk:
+> ```bash
+> export RMD_TELEGRAM_BOT_TOKEN="123456789:ABC..."
+> export RMD_TELEGRAM_CHAT_ID="987654321"
+> ```
 
 ### File Locations
 
