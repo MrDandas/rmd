@@ -66,17 +66,17 @@ impl Default for Config {
     }
 }
 
-/// Configuration directory
+/// Configuration directory: $RMD_CONFIG_DIR -> $XDG_CONFIG_HOME/rmd -> ~/.config/rmd
 pub fn get_config_dir() -> PathBuf {
     if let Ok(path) = std::env::var("RMD_CONFIG_DIR") {
         PathBuf::from(path)
+    } else if let Ok(path) = std::env::var("XDG_CONFIG_HOME") {
+        PathBuf::from(path).join("rmd")
+    } else if let Some(home) = dirs::home_dir() {
+        home.join(".config").join("rmd")
     } else {
         dirs::config_dir()
-            .unwrap_or_else(|| {
-                dirs::home_dir()
-                    .expect("Cannot find home dir")
-                    .join(".config")
-            })
+            .unwrap_or_else(|| PathBuf::from("."))
             .join("rmd")
     }
 }
@@ -92,6 +92,17 @@ pub fn get_config_path() -> PathBuf {
 pub fn load_config() -> Config {
     let path = get_config_path();
     if !path.exists() {
+        // Fallback for macOS ~/Library/Application Support/rmd/config.json
+        if let Some(legacy_dir) = dirs::config_dir() {
+            let legacy_path = legacy_dir.join("rmd").join("config.json");
+            if legacy_path.exists() {
+                if let Ok(data) = std::fs::read_to_string(&legacy_path) {
+                    if let Ok(cfg) = serde_json::from_str(&data) {
+                        return cfg;
+                    }
+                }
+            }
+        }
         return Config::default();
     }
     std::fs::read_to_string(path)
